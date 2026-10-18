@@ -55,7 +55,7 @@ in {
     # the short-circuit. Forwarding/NAT offload is CPE_FAST_PATH/CDX, a
     # different path, and keeps working. The greps make a silent no-op a build
     # failure.
-    nixpkgs.overlays = lib.mkIf (!cfg.ipsecOffload) [
+    nixpkgs.overlays = lib.mkIf (!cfg.ipsecOffload) (lib.mkAfter [
       (_final: prev: {
         mono-gateway-kernel = prev.mono-gateway-kernel.overrideAttrs (old: {
           postPatch = (old.postPatch or "") + ''
@@ -72,7 +72,7 @@ in {
           '';
         });
       })
-    ];
+    ]);
 
     # --- Out-of-tree kernel modules ---
     boot.extraModulePackages = [
