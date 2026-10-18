@@ -20,9 +20,58 @@ in
       default = ../pkgs/cmm/fastforward;
       description = "CMM fastforward exclusion rules config file";
     };
+
+    ipsecOffload = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Let the NXP IPsec fast path hand its SAs to cmm. Set this to false
+        for a box that *terminates* IPsec: the offload is key-engine driven
+        and assumes a forwarded SA, so a locally-terminated tunnel leaves
+        the child SAs at 0 bytes and no ESP goes out.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    # --- IPsec: keep the SAs in software ---
+    # The NXP IPsec fast path (net/xfrm/xfrm_policy.c under IPSEC_FLOW_CACHE,
+    # plus CONFIG_INET_IPSEC_OFFLOAD) pushes every SA's handles and tunnel
+    # header to userspace: ipsec_flow_add() fills the kernel flow cache and
+    # pfkey_send_notify -> ipsec_nlkey_send() tells the key engine. keytrack.c
+    # picks that up and cmm programs FPP_CMD_IPSEC_SA_TNL_ROUTE into the FMan.
+    # That assumes a *forwarded* SA: for a locally-terminated tunnel
+    # __cmmRouteRegister fails ("route sa entry add failed") yet the FPP
+    # command is still issued, and the datapath is broken -- child SAs at 0
+    # bytes, no ESP.
+    #
+    # cmm has no runtime switch, so cut both kernel paths at the source.
+    # Patching only the flow-cache hook still leaves two handles in cmm's
+    # table. Turning CONFIG_INET_IPSEC_OFFLOAD off instead does not build (NXP
+    # reads skb->ipsec_offload unguarded from a dev_queue_xmit helper), hence
+    # the short-circuit. Forwarding/NAT offload is CPE_FAST_PATH/CDX, a
+    # different path, and keeps working. The greps make a silent no-op a build
+    # failure.
+    nixpkgs.overlays = lib.mkIf (!cfg.ipsecOffload) [
+      (_final: prev: {
+        mono-gateway-kernel = prev.mono-gateway-kernel.overrideAttrs (old: {
+          postPatch = (old.postPatch or "") + ''
+            sed -i 's/if (ipsec_flow_add(/if (0 && ipsec_flow_add(/g' net/xfrm/xfrm_policy.c
+            sed -i 's/ipsec_nlkey_send(net, x, c);/if (0) ipsec_nlkey_send(net, x, c);/' net/key/af_key.c
+            test "$(grep -c 'if (0 && ipsec_flow_add(' net/xfrm/xfrm_policy.c)" -ge 2 || {
+              echo "FAILED: xfrm_policy.c ipsec_flow_add call sites not short-circuited"
+              exit 1
+            }
+            grep -q 'if (0) ipsec_nlkey_send(net, x, c);' net/key/af_key.c || {
+              echo "FAILED: af_key.c ipsec_nlkey_send not short-circuited"
+              exit 1
+            }
+          '';
+        });
+      })
+    ];
+
     # --- Out-of-tree kernel modules ---
     boot.extraModulePackages = [
       pkgs.mono-gateway-auto-bridge
