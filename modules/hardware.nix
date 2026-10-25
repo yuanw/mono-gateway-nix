@@ -38,13 +38,23 @@
   };
 
   # --- Serial console ---
-  systemd.services."serial-getty@ttyS0" = {
-    enable = true;
-    serviceConfig.ExecStart = [
-      ""  # clear the default
-      "@${pkgs.util-linux}/sbin/agetty agetty --autologin root --noclear 115200 ttyS0 vt100"
-    ];
-  };
+  # Deliberately unconfigured. The console is instantiated by systemd's own
+  # getty generator (kernel cmdline console=ttyS0,115200 ->
+  # /run/systemd/generator/getty.target.wants/serial-getty@ttyS0.service), and
+  # NixOS's template ExecStart -- agetty --login-program .../login %I
+  # --keep-baud -- is what runs, so the port asks for a login.
+  #
+  # This used to declare, on serial-getty@ttyS0.service:
+  #
+  #     serviceConfig.ExecStart = [ "" "@...agetty --autologin root ..." ];
+  #
+  # which never took effect: NixOS applies the serial-getty@ template and its
+  # overrides.conf drop-in after the instance fragment, and that drop-in
+  # starts with a bare `ExecStart=` that clears the list. Verified with
+  # `systemctl cat serial-getty@ttyS0.service` -- the effective ExecStart is
+  # NixOS's default, no --autologin. Kept here as a comment because the
+  # instance-level form is the trap: anything that has to win over the stock
+  # getty goes on the template, not the instance.
 
   # Auto-detect terminal size on serial console
   programs.bash.loginShellInit = ''
