@@ -53,11 +53,17 @@ in
     # the short-circuit. Forwarding/NAT offload is CPE_FAST_PATH/CDX, a
     # different path, and keeps working. The greps make a silent no-op a build
     # failure.
+    #
+    # The \& in the first sed are load-bearing: an unescaped & in a sed
+    # replacement means "the text matched", so the short-circuit expanded to
+    # `if (0 if (ipsec_flow_add(if (ipsec_flow_add( ipsec_flow_add(net, ...`,
+    # which is not C. The grep below is what catches it -- it failed on every
+    # tree until the backslashes went in.
     nixpkgs.overlays = lib.mkIf (!cfg.ipsecOffload) (lib.mkAfter [
       (_final: prev: {
         mono-gateway-kernel = prev.mono-gateway-kernel.overrideAttrs (old: {
           postPatch = (old.postPatch or "") + ''
-            sed -i 's/if (ipsec_flow_add(/if (0 && ipsec_flow_add(/g' net/xfrm/xfrm_policy.c
+            sed -i 's/if (ipsec_flow_add(/if (0 \&\& ipsec_flow_add(/g' net/xfrm/xfrm_policy.c
             sed -i 's/ipsec_nlkey_send(net, x, c);/if (0) ipsec_nlkey_send(net, x, c);/' net/key/af_key.c
             test "$(grep -c 'if (0 && ipsec_flow_add(' net/xfrm/xfrm_policy.c)" -ge 2 || {
               echo "FAILED: xfrm_policy.c ipsec_flow_add call sites not short-circuited"
