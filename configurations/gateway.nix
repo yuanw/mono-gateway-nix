@@ -5,10 +5,15 @@
     ../modules/hardware.nix
     ../modules/networking.nix
     ../modules/ask-offload.nix
+    ../modules/ask-dhcp-firewall-workaround.nix
   ];
 
   # --- ASK fast path ---
   mono-gateway.ask.enable = true;
+
+  # BOOTP vs the nixpkgs nftables rpfilter chain — see the module for the
+  # counter-proven incident write-up (2026-11-01).
+  mono-gateway.ask.dhcpRpfBypass = true;
 
   # --- Users ---
   users.users.root.initialHashedPassword = "";  # empty password for serial console (physical access = trusted)
